@@ -1,7 +1,14 @@
 // Error code types with descriptive names and grouping
 export type CameraErrorCode =
+    | 'no-permissions-api'
     | 'configuration-error'
     | 'no-device'
+    | 'no-media-devices-support'
+    | 'camera-start-error'
+    | 'camera-initialization-error'
+    | 'no-stream'
+    | 'camera-settings-error'
+    | 'camera-stop-error'
     | 'camera-already-in-use'
     | 'unknown';
 

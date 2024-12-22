@@ -1,4 +1,12 @@
-export type EventType = 'start' | 'stop' | 'error' | 'photo' | 'ready';
+export type EventType =
+    | 'deviceChange'   // เมื่อมีการเปลี่ยนกล้อง
+    | 'streamStart'    // เมื่อเริ่มสตรีม
+    | 'streamStop'     // เมื่อหยุดสตรีม
+    | 'capture'        // เมื่อถ่ายภาพ
+    | 'recordStart'    // เมื่อเริ่มอัด
+    | 'recordStop'     // เมื่อหยุดอัด
+    | 'onSettingsChange' // เมื่อมีการเปลี่ยนการตั้งค่า
+    | 'error';         // เมื่อเกิดข้อผิดพลาด
 
 export interface EventDetail {
     status: 'success' | 'error';
