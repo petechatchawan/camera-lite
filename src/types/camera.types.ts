@@ -42,10 +42,23 @@ export type CameraCaptureOptions = {
 export interface Resolution {
     width: number;
     height: number;
+    name?: string;
     // aspectRatio: number;
     // name: string;
     // preset?: ResolutionPreset;
 }
+
+export interface MaxResolution {
+    deviceId: string;
+    label: string;
+    maxWidth: number;
+    maxHeight: number;
+}
+
+export interface ResolutionSupport extends Resolution {
+    isSupported: boolean;
+}
+
 
 // Configuration interfaces
 export interface CameraConfiguration {
@@ -124,11 +137,11 @@ export interface CameraState {
     devices: MediaDeviceInfo[];
     activeDevice?: MediaDeviceInfo;
     activeResolution?: Resolution;
-    userPreferredDevice?: MediaDeviceInfo;
 
     // Stream State
     stream?: MediaStream | null;
-    isStreaming: boolean;
+    isActive: boolean;
+    isInitializing: boolean;
 
     // Camera Settings
     capabilities?: CameraCapabilities;
@@ -142,11 +155,12 @@ export interface CameraState {
     // Error State
     error?: CameraError<CameraErrorCode>
 
+    // todo: make support recording
     // Recording State
-    isRecording: boolean;
-    recordedChunks: Blob[];
-    recordingDuration?: number;
-    recordingFormat?: string;
+    // isRecording: boolean;
+    // recordedChunks: Blob[];
+    // recordingDuration?: number;
+    // recordingFormat?: string;
 
     // Photo Capture State
     lastCapturedImage?: CameraCapturedResult

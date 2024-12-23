@@ -1,66 +1,92 @@
 
 
-import { CameraConfiguration, CameraSettings, CameraState, CameraType, PermissionResponse, PermissionStatus, Resolution } from "../types/camera.types";
+import { CameraConfiguration, CameraSettings, CameraState, CameraType, MaxResolution, PermissionResponse, PermissionStatus, Resolution, ResolutionSupport } from "../types/camera.types";
 import { CameraError } from "../types/error.types";
 import { EventDetail, EventManager, EventType } from "./event-manager";
 
-export class CameraManager {
+export class CameraControl {
+    private static readonly STANDARD_RESOLUTIONS: Resolution[] = [
+        // Landscape orientations
+        { width: 640, height: 480, name: 'VGA Landscape' },
+        { width: 1280, height: 720, name: 'HD Landscape' },
+        { width: 1920, height: 1080, name: 'Full HD Landscape' },
+        { width: 2560, height: 1440, name: 'QHD Landscape' },
+        { width: 3840, height: 2160, name: '4K Landscape' },
+
+        // Portrait orientations
+        { width: 480, height: 640, name: 'VGA Portrait' },
+        { width: 720, height: 1280, name: 'HD Portrait' },
+        { width: 1080, height: 1920, name: 'Full HD Portrait' },
+        { width: 1440, height: 2560, name: 'QHD Portrait' },
+        { width: 2160, height: 3840, name: '4K Portrait' },
+
+        // Common mobile resolutions landscape
+        { width: 854, height: 480, name: 'FWVGA Landscape' },
+        { width: 960, height: 540, name: 'qHD Landscape' },
+        { width: 1600, height: 900, name: 'HD+ Landscape' },
+        { width: 2048, height: 1152, name: '2K Landscape' },
+
+        // Common mobile resolutions portrait
+        { width: 480, height: 854, name: 'FWVGA Portrait' },
+        { width: 540, height: 960, name: 'qHD Portrait' },
+        { width: 900, height: 1600, name: 'HD+ Portrait' },
+        { width: 1152, height: 2048, name: '2K Portrait' }
+    ];
+
     private readonly events = new EventManager();
     private currentState: CameraState = {
         devices: [],
+        hasMultipleDevices: false,
         activeDevice: undefined,
-        userPreferredDevice: undefined,
+        activeResolution: undefined,
         stream: undefined,
-        isStreaming: false,
+        isActive: false,
+        isInitializing: false,
         capabilities: undefined,
         currentSettings: undefined,
-        hasMultipleDevices: false,
+        lastCapturedImage: undefined,
+        isMirrored: false,
+        supportsTorch: false,
+        supportsFocus: false,
+        supportsZoom: false,
+        supportsRecording: false,
         error: undefined,
-        isRecording: false,
-        recordedChunks: [],
         configuration: {
             previewElement: null,
             captureElement: null,
             isAudioEnabled: false,
             selectedDevice: null,
             cameraType: 'front',
-            targetResolution: { width: 1280, height: 720 },
-            fallbackResolution: { width: 640, height: 480 },
+            targetResolution: undefined,
+            fallbackResolution: undefined,
             isMirrored: false,
             isAutoRotate: false,
-            // initialConstraints: {},
-            // captureFormat: 'image/jpeg',
         },
-        lastCapturedImage: undefined,
-        // frameRate: undefined,
-        // latency: undefined,
-        isMirrored: false,
-        // isFullscreen: false,
-        supportsTorch: false,
-        supportsFocus: false,
-        supportsZoom: false,
-        supportsRecording: false
+    }
+
+    constructor() {
+        console.log("[CameraControl] Constructing...");
+        this.setupChangeListeners();
     }
 
     //#region State Management
-    // public get devices(): MediaDeviceInfo[] {
-    //     return this.currentState.devices;
-    // }
+    public get state(): CameraState {
+        return this.currentState;
+    }
 
-    // public get stream(): MediaStream | undefined {
-    //     return this.currentState.stream || undefined;
-    // }
+    public getActiveDevice(): MediaDeviceInfo | undefined {
+        return this.currentState.activeDevice || undefined;
+    }
 
-    // public get configuration(): CameraConfiguration {
-    //     return this.currentState.configuration;
-    // }
+    public getActiveResolution(): Resolution | undefined {
+        return this.currentState.activeResolution || undefined;
+    }
 
     //#region Event Management
     private setupChangeListeners(): void {
-        // 1. Handle Device Changes
         navigator.mediaDevices.addEventListener('devicechange', async () => {
-            // todo: handle device changes
-            // await this.refreshDeviceList();
+            // ? Handle Device Changes
+            await this.updateDeviceList();
         });
 
         // 2. Handle Visibility Change
@@ -193,8 +219,6 @@ export class CameraManager {
             };
         }
     }
-
-
     //#endregion
 
     //#region Device Management
@@ -252,16 +276,19 @@ export class CameraManager {
     private async requestUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream> {
         try {
             return await navigator.mediaDevices.getUserMedia(constraints);
-        } catch (e) {
-            const cameraError = new CameraError('camera-start-error', 'Failed to obtain user media', e instanceof Error ? e : undefined);
-            this.handleError(cameraError);
-            throw cameraError;
+        } catch (error) {
+            throw error;
         }
     }
 
     async startStream() {
         try {
             // todo: clear state before starting
+            // update state before starting
+            this.currentState.isInitializing = true;
+            this.currentState.isActive = false;
+            this.currentState.error = undefined;
+
             // Start camera
             const useFallbackMode = this.currentState.configuration.fallbackResolution ? true : false;
             const constraints = this.createMediaStreamConstraints(useFallbackMode);
@@ -273,9 +300,6 @@ export class CameraManager {
                 );
             }
 
-            // camera can be started
-            // todo: update state after starting
-
             // ? set preview
             await this.setPreviewStream(stream);
 
@@ -285,8 +309,25 @@ export class CameraManager {
             // ? update mirror effect
             this.applyMirrorEffect();
 
+            // todo: update state after starting
+            // update state after starting
+            this.currentState.isActive = true;
+            this.emitEvent('streamStart', {
+                status: 'success', data: {
+                    activeDevice: this.currentState.activeDevice,
+                    activeResolution: this.currentState.activeResolution
+                }
+            });
         } catch (error) {
-
+            // update state after error
+            this.currentState.isActive = false;
+            throw new CameraError(
+                'camera-start-error',
+                'Failed to start camera',
+                error instanceof Error ? error : undefined
+            );
+        } finally {
+            this.currentState.isInitializing = false;
         }
     }
 
@@ -352,7 +393,6 @@ export class CameraManager {
                 }
 
                 this.currentState.configuration.previewElement.onloadedmetadata = () => {
-                    this.emitEvent('streamStart', { status: 'success' });
                     resolve(true);
                 };
             });
@@ -415,11 +455,12 @@ export class CameraManager {
 
         // update state
         this.currentState.stream = stream;
+        this.currentState.isActive = true;
         this.currentState.activeDevice = selectedCamera;
         this.currentState.activeResolution = actualResolution;
         this.currentState.configuration = updatedConfig;
 
-
+        console.log('Updated camera state:', this.currentState);
     }
 
     private shouldSwapDimensions(
@@ -521,6 +562,80 @@ export class CameraManager {
     }
     //#endregion
 
+    //#region Camera Capabilities
+    async initializeCameraCapabilities(): Promise<MaxResolution[]> {
+        try {
+            // ขอ permission และดึงรายการกล้องทั้งหมด
+            const devices = await this.getVideoDevices();
+
+            // วิเคราะห์ความสามารถของทุกกล้องพร้อมกัน
+            const capabilities = await Promise.all(devices.map(device => this.analyzeCameraDevice(device)));
+
+            return capabilities.filter(Boolean) as MaxResolution[];
+        } catch (error) {
+            console.error('Failed to initialize camera capabilities:', error);
+            throw error;
+        }
+    }
+
+    private async getVideoDevices(): Promise<MediaDeviceInfo[]> {
+        // ขอ permission ก่อนเพื่อให้เห็น device labels
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach(track => track.stop());
+
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        return devices.filter(device => device.kind === 'videoinput');
+    }
+
+    private async analyzeCameraDevice(device: MediaDeviceInfo): Promise<MaxResolution | null> {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    deviceId: { exact: device.deviceId },
+                    width: { ideal: 4096 },
+                    height: { ideal: 2160 }
+                }
+            });
+
+            const track = stream.getVideoTracks()[0];
+            const settings = track.getSettings();
+
+            // ทำความสะอาด stream ทันที
+            stream.getTracks().forEach(track => track.stop());
+
+            return {
+                deviceId: device.deviceId,
+                label: device.label,
+                maxWidth: settings.width || 0,
+                maxHeight: settings.height || 0,
+            };
+        } catch (error) {
+            console.warn(`Could not analyze device ${device.label}:`, error);
+            return null;
+        }
+    }
+
+    // ตรวจสอบ resolution จากข้อมูล MaxResolution โดยไม่ต้องเปิดกล้อง
+    isResolutionSupportedFromSpecs(maxResolution: MaxResolution, width: number, height: number): boolean {
+        return width <= maxResolution.maxWidth && height <= maxResolution.maxHeight;
+    }
+
+    // ตรวจสอบ resolutions ทั้งหมดจากข้อมูล MaxResolution
+    checkSupportedResolutionsFromSpecs(
+        maxResolution: MaxResolution,
+        resolutions: Resolution[] = CameraControl.STANDARD_RESOLUTIONS
+    ): ResolutionSupport[] {
+        return resolutions.map(resolution => ({
+            ...resolution,
+            isSupported: this.isResolutionSupportedFromSpecs(
+                maxResolution,
+                resolution.width,
+                resolution.height
+            )
+        }));
+    }
+    //#endregion
+
 
     //#region Camera Control
     async initialize(config: CameraConfiguration): Promise<void> {
@@ -529,6 +644,8 @@ export class CameraManager {
                 ...this.currentState.configuration,
                 ...config
             };
+
+            console.log("CurrentState configuration: ", this.currentState.configuration);
 
             // Check browser support
             this.checkMediaDevicesSupport();
@@ -544,13 +661,10 @@ export class CameraManager {
             // Update capabilities
             await this.updateCapabilities();
         } catch (error) {
-            this.handleError(
-                new CameraError(
-                    'camera-initialization-error',
-                    'Failed to initialize camera',
-                    error instanceof Error ? error : undefined
-                )
-            );
+            console.error('Failed to initialize camera:', error);
+            this.currentState.error = error instanceof CameraError
+                ? error
+                : new CameraError('unknown', 'An unknown error occurred');
             throw error;
         }
     }
