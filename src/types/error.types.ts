@@ -1,6 +1,7 @@
 // Error code types with descriptive names and grouping
 export type CameraErrorCode =
     | 'no-permissions-api'
+    | 'permission-denied'
     | 'configuration-error'
     | 'no-device'
     | 'no-media-devices-support'
@@ -10,6 +11,9 @@ export type CameraErrorCode =
     | 'camera-settings-error'
     | 'camera-stop-error'
     | 'camera-already-in-use'
+    | 'camera-take-photo-error'
+    | 'torch-error'
+    | 'timeout'
     | 'unknown';
 
 export class CameraError<T extends CameraErrorCode> extends Error {
@@ -21,7 +25,7 @@ export class CameraError<T extends CameraErrorCode> extends Error {
         return this._code;
     }
 
-    get message(): string {
+    override get message(): string {
         return this._message;
     }
 
@@ -30,7 +34,7 @@ export class CameraError<T extends CameraErrorCode> extends Error {
     }
 
     constructor(code: T, message: string, originalError?: Error) {
-        const fullMessage = `[${code}]: ${message}${originalError ? `\nCaused by: ${originalError.message}` : ''}`;
+        const fullMessage = `[${code}]: ${message}${originalError ? `\nCaused by: ${originalError}` : ''}`;
         super(fullMessage);
         this.name = code;
         this._code = code;
@@ -38,9 +42,9 @@ export class CameraError<T extends CameraErrorCode> extends Error {
         this._originalError = originalError;
     }
 
-    public toString(): string {
+    public override  toString(): string {
         return this._originalError
-            ? `[${this.code}]: ${this.message} (caused by: ${this._originalError.message})`
+            ? `[${this.code}]: ${this.message} (caused by: ${this._originalError})`
             : `[${this.code}]: ${this.message}`;
     }
 }

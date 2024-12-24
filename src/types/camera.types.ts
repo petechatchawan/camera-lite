@@ -1,3 +1,4 @@
+import { EventDetail } from "../main/event-manager";
 import { CameraError, CameraErrorCode } from "./error.types";
 
 export enum PermissionStatus {
@@ -22,7 +23,7 @@ export interface PermissionResponse {
 
 export type CameraType = 'front' | 'back';
 
-export type ImageType = 'png' | 'jpg';
+export type ImageType = 'image/png' | 'image/jpeg';
 
 export type CameraCapturedResult = {
     width: number;
@@ -57,36 +58,6 @@ export interface MaxResolution {
 
 export interface ResolutionSupport extends Resolution {
     isSupported: boolean;
-}
-
-
-// Configuration interfaces
-export interface CameraConfiguration {
-    // DOM Elements
-    previewElement?: HTMLVideoElement | null;
-    captureElement?: HTMLCanvasElement | null;
-
-    // Device Settings
-    isAudioEnabled?: boolean;
-    selectedDevice?: MediaDeviceInfo | null;
-    cameraType?: CameraType;
-
-    // Resolution Settings
-    targetResolution?: Resolution;
-    fallbackResolution?: Resolution;
-
-    // Display Settings
-    isMirrored?: boolean;
-    isAutoRotate?: boolean;
-
-    // Advanced Settings
-    // initialConstraints?: MediaTrackConstraints;
-    // captureFormat?: 'image/jpeg' | 'image/png' | 'image/webp';
-    // captureQuality?: number; // 0-1
-
-    // Performance Settings
-    // powerEfficient?: boolean;
-    // lowLatency?: boolean;
 }
 
 // Camera capabilities and constraints
@@ -131,56 +102,53 @@ export interface CameraSettings {
     zoom?: number;
 };
 
-// State interface
+// Main Camera State Interface
 export interface CameraState {
     // Device Information
     devices: MediaDeviceInfo[];
     activeDevice?: MediaDeviceInfo;
     activeResolution?: Resolution;
+    hasMultipleDevices: boolean;
+    selectedDevice?: MediaDeviceInfo | null;
+    cameraType?: CameraType;
 
-    // Stream State
+    // Stream and Activity State
     stream?: MediaStream | null;
     isActive: boolean;
     isInitializing: boolean;
 
-    // Camera Settings
+    // Settings and Capabilities
     capabilities?: CameraCapabilities;
     currentSettings?: CameraSettings;
-    // defaultConstraints: CameraConstraints;
+    isAudioEnabled: boolean;
+    targetResolution?: Resolution;
+    fallbackResolution?: Resolution;
+    isAutoRotate: boolean;
 
-    // Utils
-    hasMultipleDevices: boolean;
-    configuration: CameraConfiguration;
+    // Elements
+    previewElement: HTMLVideoElement | null;
+    captureElement: HTMLCanvasElement | null;
 
-    // Error State
-    error?: CameraError<CameraErrorCode>
-
-    // todo: make support recording
-    // Recording State
-    // isRecording: boolean;
-    // recordedChunks: Blob[];
-    // recordingDuration?: number;
-    // recordingFormat?: string;
-
-    // Photo Capture State
-    lastCapturedImage?: CameraCapturedResult
-
-    // Performance Metrics
-    // frameRate?: number;
-    // latency?: number;
-    // batteryImpact?: number;
-
-    // UI State
-    isMirrored: boolean;
-    // isFullscreen: boolean;
-    // brightness: number;
-    // contrast: number;
-
-    // Features State
+    // Features Support
     supportsTorch: boolean;
     supportsFocus: boolean;
     supportsZoom: boolean;
     supportsRecording: boolean;
+
+    // UI State
+    isMirrored: boolean;
+
+    // Results
+    lastCapturedImage?: CameraCapturedResult;
+
+    // Error Handling
+    error?: CameraError<CameraErrorCode>;
+
+    // Callbacks
+    onStateChange?: (state: CameraState) => void;
+    onError?: (error: EventDetail) => void;
+    onStarted?: () => void
+    onStopped?: () => void;
 }
 
 
