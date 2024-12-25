@@ -91,18 +91,11 @@ export class CameraControl {
 
     // Methods for updating state
     private updateCameraState(newState: Partial<CameraState>): void {
-        // อัปเดตสถานะ
         const updatedState = { ...this.cameraState, ...newState };
-
-        // เรียก Callback หากถูกกำหนด
         if (this.cameraState.onStateChange) {
             this.cameraState.onStateChange(updatedState);
         }
-
-        // อัปเดตสถานะใหม่ในตัวแปร
         Object.assign(this.cameraState, updatedState);
-
-        console.log("Updated CameraState:", this.cameraState);
     }
 
     // Reset state
@@ -249,29 +242,21 @@ export class CameraControl {
      * Get list of available camera devices
      */
     public async getDevices(): Promise<MediaDeviceInfo[]> {
-        console.log('Requesting available camera devices');
-
-        // Return cached devices if available
         if (this.cameraState.devices.length > 0) {
-            console.log('Using cached camera devices');
             return this.cameraState.devices;
         }
 
         try {
-            console.log('Updating device list');
             await this.updateDeviceList();
             if (this.cameraState.devices.length === 0) {
-                console.log('No video input devices found');
                 throw new CameraError(
                     'no-device',
                     'No video input devices found'
                 );
             }
 
-            console.log('Returning available camera devices');
             return this.cameraState.devices;
         } catch (error) {
-            console.log('Error getting available camera devices', error);
             this.handleError(error);
             return [];
         }
@@ -281,8 +266,7 @@ export class CameraControl {
         // Check browser support
         this.checkMediaDevicesSupport();
 
-        // Update device list
-        // Enumerate available devices
+        // Enumerate available devices and update device list
         const updatedDevices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = updatedDevices.filter(device => device.kind === 'videoinput');
         this.updateCameraState({
@@ -292,8 +276,8 @@ export class CameraControl {
     }
 
     /**
-   * Returns the next available camera
-   */
+     * Returns the next available camera
+     */
     private async findNextDevice(): Promise<MediaDeviceInfo | null> {
         const devices = await this.getDevices();
         if (devices.length <= 1) {
@@ -441,7 +425,6 @@ export class CameraControl {
     }
 
     private updateStreamSettings(stream: MediaStream): void {
-        console.log("Stream", stream);
         if (stream === null) {
             console.warn('updateStreamSettings: stream is null');
             return;
@@ -451,39 +434,27 @@ export class CameraControl {
         const capabilities = videoTrack.getSettings();
         const { width = 0, height = 0, deviceId, facingMode } = capabilities;
 
-        // หาข้อมูลกล้องที่กำลังใช้งาน
         const selectedCamera = this.cameraState.devices.find(camera => camera.deviceId === deviceId);
         if (!selectedCamera) {
             console.warn('Selected camera not found in available devices');
         }
 
-        // update current camera type
-
-
-        // ตรวจสอบว่าได้ความละเอียดที่ต้องการหรือไม่
         const requestedResolution = this.cameraState.targetResolution ?? null;
         const autoSwapResolution = this.cameraState.isAutoRotate ?? false;
 
-        // ตรวจสอบว่าต้องสลับ width/height หรือไม่
         const shouldSwapDimensions = requestedResolution !== null && this.shouldSwapDimensions(
             requestedResolution,
             { width, height },
             autoSwapResolution ?? false
         );
 
-        // สร้าง actualResolution โดยพิจารณาการสลับ width/height
         const actualResolution: Resolution = {
             width: shouldSwapDimensions ? height : width,
             height: shouldSwapDimensions ? width : height,
-            // aspectRatio: shouldSwapDimensions
-            //     ? height / width
-            //     : aspectRatio || (width && height ? width / height : 0),
             name: requestedResolution?.name || 'unknown',
         };
 
-        // ถ้าความละเอียดไม่ตรงกับที่ขอ ให้แจ้งเตือน
-        if (requestedResolution && (requestedResolution.width !== actualResolution.width || requestedResolution.height !== actualResolution.height)
-        ) {
+        if (requestedResolution && (requestedResolution.width !== actualResolution.width || requestedResolution.height !== actualResolution.height)) {
             console.warn(
                 `Requested resolution (${requestedResolution.width}x${requestedResolution.height}) ` +
                 `differs from actual resolution (${actualResolution.width}x${actualResolution.height})` +
@@ -491,15 +462,12 @@ export class CameraControl {
             );
         }
 
-        // update configuration
         const updatedConfig: Partial<CameraState> = {
             targetResolution: actualResolution,
             selectedDevice: selectedCamera ?? undefined,
             cameraType: (facingMode as CameraType) || this.cameraState.cameraType,
         };
 
-        // update state
-        console.log('Updating camera state:', updatedConfig);
         this.updateCameraState({
             stream: stream,
             isActive: true,
@@ -507,7 +475,6 @@ export class CameraControl {
             activeResolution: actualResolution,
             ...updatedConfig,
         });
-        console.log('Updated camera state:', this.cameraState);
     }
 
     private shouldSwapDimensions(
@@ -758,6 +725,14 @@ export class CameraControl {
         }));
     }
 
+    /**
+     * Toggles the torch (flashlight) on the active video stream.
+     *
+     * @param enable - A boolean indicating whether to enable (true) or disable (false) the torch.
+     * @throws Will throw an error if the video stream is not initialized or no video track is found.
+     * @throws Will log a warning if the torch capability is not supported on the device.
+     * @throws Will handle an error if applying the torch constraint fails.
+     */
     async enableTorch(enable: boolean) {
         if (!this.cameraState.stream) {
             throw new Error('Stream is not initialized');
@@ -770,40 +745,55 @@ export class CameraControl {
 
         const capabilities = videoTrack.getCapabilities();
         if (!('torch' in capabilities)) {
-            console.warn("Torch is not supported on this device.");
-            return;
+            throw new CameraError(
+                'torch-error',
+                'Torch capability is not supported on this device',
+            )
         }
 
         try {
             await videoTrack.applyConstraints({
                 advanced: [{ torch: enable }] as any,
             });
-            console.log(`Torch has been ${enable ? "enabled" : "disabled"}.`);
         } catch (error) {
-            this.handleError(new CameraError(
+            this.handleError(error instanceof CameraError ? error : new CameraError(
                 'torch-error',
-                `Failed to ${enable ? "enable" : "disable"} torch: ${error}`,
+                `Failed to ${enable ? 'enable' : 'disable'} torch`,
                 error as Error
             ));
         }
     }
 
+    /**
+     * Sets the focus mode on the active video stream.
+     *
+     * @param stream - The active video stream.
+     * @param focusMode - The focus mode to set. Can be 'continuous', 'manual', or 'single-shot'.
+     * @throws Will do nothing if the video stream is not initialized or no video track is found.
+     * @throws Will log a warning if the focus mode capability is not supported on the device.
+     * @throws Will handle an error if applying the focus mode constraint fails.
+     */
     async setFocusMode(stream: MediaStream, focusMode: 'continuous' | 'manual' | 'single-shot') {
         const videoTrack = stream.getVideoTracks()[0];
         const capabilities = videoTrack.getCapabilities();
 
         if (!('focusMode' in capabilities) || !(capabilities.focusMode as string[]).includes(focusMode)) {
-            console.warn(`Focus mode "${focusMode}" is not supported.`);
-            return;
+            throw new CameraError(
+                'focus-error',
+                `Focus mode '${focusMode}' is not supported on this device.}`,
+            )
         }
 
         try {
             await videoTrack.applyConstraints({
                 advanced: [{ focusMode }] as any,
             });
-            console.log(`Focus mode set to "${focusMode}".`);
         } catch (error) {
-            console.error("Failed to set focus mode:", error);
+            this.handleError(error instanceof CameraError ? error : new CameraError(
+                'focus-error',
+                `Failed to set focus mode: ${error}`,
+                error as Error
+            ));
         }
     }
 

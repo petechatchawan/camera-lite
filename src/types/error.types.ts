@@ -13,6 +13,7 @@ export type CameraErrorCode =
     | 'camera-already-in-use'
     | 'camera-take-photo-error'
     | 'torch-error'
+    | 'focus-error'
     | 'timeout'
     | 'unknown';
 
