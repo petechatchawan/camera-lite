@@ -1,32 +1,39 @@
-
-
-
-import { CameraCapturedResult, CameraCaptureOptions, CameraSettings, CameraState, CameraType, MaxResolution, PermissionResponse, PermissionStatus, Resolution, ResolutionSupport } from "../types/camera.types";
-import { CameraError, CameraErrorCode } from "../types/error.types";
-import { EventManager } from "./event-manager";
+import { BehaviorSubject } from 'rxjs';
+import {
+    CameraCapturedResult,
+    CameraCaptureOptions,
+    CameraRuntimeState,
+    CameraSettings,
+    CameraType,
+    MaxResolution,
+    PermissionResponse,
+    PermissionStatus,
+    Resolution,
+    ResolutionSupport,
+} from '../types/camera.types';
+import { CameraError, CameraErrorCode } from '../types/error.types';
 
 // Default State Factory
-function getInitialCameraState(): CameraState {
+export function getInitialCameraState(): CameraRuntimeState {
     return {
         // Device Information
         devices: [],
         hasMultipleDevices: false,
         activeDevice: undefined,
-        selectedDevice: null,
         cameraType: 'front',
 
         // Stream and Activity State
-        stream: null,
+        activeStream: undefined,
         isActive: false,
         isInitializing: false,
 
         // Settings and Capabilities
         capabilities: undefined,
         currentSettings: undefined,
-        isAudioEnabled: false,
+        enableAudio: false,
         targetResolution: undefined,
         fallbackResolution: undefined,
-        isAutoRotate: false,
+        enableAutoRotation: false,
 
         // Elements
         previewElement: null,
@@ -39,18 +46,18 @@ function getInitialCameraState(): CameraState {
         supportsRecording: false,
 
         // UI State
-        isMirrored: false,
+        // isMirrored: false,
+        isTorchEnabled: false,
 
         // Results
         lastCapturedImage: undefined,
 
         // Error Handling
-        error: undefined
+        error: undefined,
     };
 }
 
-
-export class CameraControl {
+export class CameraLite {
     private static readonly STANDARD_RESOLUTIONS: Resolution[] = [
         // Landscape orientations
         { width: 640, height: 480, name: 'VGA Landscape' },
@@ -76,21 +83,49 @@ export class CameraControl {
         { width: 480, height: 854, name: 'FWVGA Portrait' },
         { width: 540, height: 960, name: 'qHD Portrait' },
         { width: 900, height: 1600, name: 'HD+ Portrait' },
-        { width: 1152, height: 2048, name: '2K Portrait' }
+        { width: 1152, height: 2048, name: '2K Portrait' },
     ];
 
-    private readonly events = new EventManager();
-    private cameraState: CameraState = getInitialCameraState();
+    private readonly state = new BehaviorSubject<CameraRuntimeState>(getInitialCameraState());
 
     constructor() {
-        console.log("[CameraControl] Constructing...");
-        this.setupChangeListeners();
+        console.log('[CameraLite] Constructing...');
+        this.checkOrientation();
+    }
+
+    public checkOrientation() {
+        console.log('[CameraLite] Checking orientation...');
+        if (screen.orientation) {
+            console.log('Screen orientation is supported');
+            const orientation = screen.orientation.type;
+            const angle = screen.orientation.angle;
+            console.log(`Orientation type: ${orientation}, angle: ${angle}`);
+
+            switch (orientation) {
+                case 'portrait-primary':
+                    console.log('Portrait (ปกติ)');
+                    break;
+                case 'portrait-secondary':
+                    console.log('Portrait (กลับหัว)');
+                    break;
+                case 'landscape-primary':
+                    console.log('Landscape (ปกติ)');
+                    break;
+                case 'landscape-secondary':
+                    console.log('Landscape (กลับด้าน)');
+                    break;
+                default:
+                    console.log('Unknown orientation');
+            }
+        } else {
+            console.log('screen.orientation is not supported');
+        }
     }
 
     //#region State Management
 
     // Methods for updating state
-    private updateCameraState(newState: Partial<CameraState>): void {
+    private updateCameraState(newState: Partial<CameraRuntimeState>): void {
         const updatedState = { ...this.cameraState, ...newState };
         if (this.cameraState.onStateChange) {
             this.cameraState.onStateChange(updatedState);
@@ -98,12 +133,15 @@ export class CameraControl {
         Object.assign(this.cameraState, updatedState);
     }
 
+    private get cameraState(): CameraRuntimeState {
+        return this.state.getValue();
+    }
     // Reset state
     private resetCameraState() {
-        this.cameraState = getInitialCameraState();
+        this.state.next(getInitialCameraState());
     }
 
-    public getCameraState(): CameraState {
+    public getCameraState(): CameraRuntimeState {
         return this.cameraState;
     }
 
@@ -115,8 +153,24 @@ export class CameraControl {
         return this.cameraState.activeResolution || undefined;
     }
 
+    public getCanvasElement(): HTMLCanvasElement | undefined {
+        return this.cameraState.captureElement || undefined;
+    }
+
+    public isCameraActive(): boolean {
+        return this.cameraState.isActive;
+    }
+
+    public isCameraInitializing(): boolean {
+        return this.cameraState.isInitializing;
+    }
+
+    public clearError(): void {
+        this.updateCameraState({ error: undefined });
+    }
+
     //#region Event Management
-    private setupChangeListeners(): void {
+    public setupChangeListeners(): void {
         navigator.mediaDevices.addEventListener('devicechange', async () => {
             // ? Handle Device Changes
             await this.updateDeviceList();
@@ -139,20 +193,18 @@ export class CameraControl {
     //#region Permission Management
     private checkPermissionsSupport(): boolean {
         if (!navigator?.permissions?.query) {
-            throw new CameraError(
-                'no-permissions-api',
-                'MediaDevices API not supported in this browser');
+            throw new CameraError('no-permissions-api', 'MediaDevices API not supported in this browser');
         }
         return true;
     }
 
     public async getCameraPermissions(): Promise<PermissionResponse> {
         return await this.handlePermissionsQuery('camera');
-    };
+    }
 
     public async getMicrophonePermissions(): Promise<PermissionResponse> {
         return await this.handlePermissionsQuery('microphone');
-    };
+    }
 
     private async handlePermissionsQuery(query: 'camera' | 'microphone'): Promise<PermissionResponse> {
         try {
@@ -160,7 +212,9 @@ export class CameraControl {
             this.checkPermissionsSupport();
 
             // Request permission
-            const { state } = await navigator.permissions.query({ name: query as PermissionName });
+            const { state } = await navigator.permissions.query({
+                name: query as PermissionName,
+            });
             switch (state) {
                 case 'prompt':
                     return {
@@ -193,7 +247,7 @@ export class CameraControl {
     async requestCameraPermissions(): Promise<PermissionResponse> {
         try {
             const stream = await this.requestUserMedia({ video: true });
-            stream.getTracks().forEach(track => track.stop());
+            stream.getTracks().forEach((track) => track.stop());
 
             return {
                 status: PermissionStatus.GRANTED,
@@ -225,18 +279,18 @@ export class CameraControl {
 
     //#region Device Management
     /**
-    * Check if the browser supports media devices
-    */
+     * Check if the browser supports media devices
+     */
     private checkMediaDevicesSupport(): boolean {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices || !navigator.mediaDevices.getUserMedia) {
-            throw new CameraError(
-                'no-media-devices-support',
-                'The browser does not support the MediaDevices API'
-            );
+        if (
+            !navigator.mediaDevices ||
+            !navigator.mediaDevices.enumerateDevices ||
+            !navigator.mediaDevices.getUserMedia
+        ) {
+            throw new CameraError('no-media-devices-support', 'The browser does not support the MediaDevices API');
         }
         return true;
     }
-
 
     /**
      * Get list of available camera devices
@@ -249,10 +303,7 @@ export class CameraControl {
         try {
             await this.updateDeviceList();
             if (this.cameraState.devices.length === 0) {
-                throw new CameraError(
-                    'no-device',
-                    'No video input devices found'
-                );
+                throw new CameraError('no-device', 'No video input devices found');
             }
 
             return this.cameraState.devices;
@@ -268,10 +319,10 @@ export class CameraControl {
 
         // Enumerate available devices and update device list
         const updatedDevices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = updatedDevices.filter(device => device.kind === 'videoinput');
+        const videoDevices = updatedDevices.filter((device) => device.kind === 'videoinput');
         this.updateCameraState({
             devices: videoDevices,
-            hasMultipleDevices: this.cameraState.devices.length > 1
+            hasMultipleDevices: this.cameraState.devices.length > 1,
         });
     }
 
@@ -285,7 +336,7 @@ export class CameraControl {
         }
 
         const selectedDevice = this.cameraState.activeDevice;
-        const currentIndex = devices.findIndex(d => d.deviceId === selectedDevice?.deviceId);
+        const currentIndex = devices.findIndex((d) => d.deviceId === selectedDevice?.deviceId);
         return devices[(currentIndex + 1) % devices.length];
     }
 
@@ -302,12 +353,11 @@ export class CameraControl {
 
     async startStream() {
         try {
-            // todo: clear state before starting
             // update state before starting
             this.updateCameraState({
                 isInitializing: true,
                 isActive: false,
-                error: undefined
+                error: undefined,
             });
 
             // stop old stream
@@ -318,10 +368,7 @@ export class CameraControl {
             const constraints = this.createMediaStreamConstraints(useFallbackMode);
             const stream = await this.requestUserMedia(constraints);
             if (!stream) {
-                throw new CameraError(
-                    'no-stream',
-                    'Failed to start camera'
-                );
+                throw new CameraError('no-stream', 'Failed to start camera');
             }
 
             // ? set preview
@@ -341,8 +388,8 @@ export class CameraControl {
             this.updateCameraState({ isActive: true });
 
             // ? call onStarted
-            if (this.cameraState.onStarted) {
-                this.cameraState.onStarted();
+            if (this.cameraState.onCameraStart) {
+                this.cameraState.onCameraStart();
             }
         } catch (error) {
             // update state after error
@@ -360,27 +407,23 @@ export class CameraControl {
     private createMediaStreamConstraints(fallbackMode: boolean = false): MediaStreamConstraints {
         const resolution = fallbackMode
             ? this.cameraState.fallbackResolution ?? {
-                width: 1280,
-                height: 720,
-                aspectRatio: 16 / 9,
-                name: '720p',
-            }
+                  width: 1280,
+                  height: 720,
+                  name: '720p',
+              }
             : this.cameraState.targetResolution ?? {
-                width: 1280,
-                height: 720,
-                aspectRatio: 16 / 9,
-                name: '720p',
-            };
+                  width: 1280,
+                  height: 720,
+                  name: '720p',
+              };
 
-        const autoSwapResolution = this.cameraState.isAutoRotate ?? false;
+        const autoSwapResolution = this.cameraState.enableAutoRotation ?? false;
         const finalResolution = this.getFinalResolution(resolution, autoSwapResolution);
         const videoConstraints: MediaTrackConstraints = {
             deviceId: this.cameraState.selectedDevice?.deviceId
                 ? { exact: this.cameraState.selectedDevice.deviceId }
                 : undefined,
-            facingMode: this.cameraState.selectedDevice?.deviceId
-                ? undefined
-                : this.cameraState.cameraType,
+            facingMode: this.cameraState.selectedDevice?.deviceId ? undefined : this.cameraState.cameraType,
             width: { exact: finalResolution.width },
             height: { exact: finalResolution.height },
         };
@@ -390,20 +433,18 @@ export class CameraControl {
         }
 
         return {
-            audio: this.cameraState.isAudioEnabled,
+            audio: this.cameraState.enableAudio,
             video: videoConstraints,
         };
     }
 
     private getFinalResolution(resolution: Resolution, autoSwapResolution: boolean): Resolution {
-        // const isMobile = this.uaInfo.isMobile() || this.uaInfo.isTablet();
         const isMobile = navigator.maxTouchPoints > 3;
         if (autoSwapResolution && isMobile) {
             return {
                 width: resolution.height,
                 height: resolution.width,
                 name: resolution.name,
-                // aspectRatio: 1 / resolution.aspectRatio,
             };
         }
         return resolution;
@@ -412,7 +453,7 @@ export class CameraControl {
     private async setPreviewStream(stream: MediaStream): Promise<void> {
         if (this.cameraState.previewElement && stream) {
             this.cameraState.previewElement.srcObject = stream;
-            await new Promise(resolve => {
+            await new Promise((resolve) => {
                 if (!this.cameraState.previewElement) {
                     return resolve(false);
                 }
@@ -434,19 +475,16 @@ export class CameraControl {
         const capabilities = videoTrack.getSettings();
         const { width = 0, height = 0, deviceId, facingMode } = capabilities;
 
-        const selectedCamera = this.cameraState.devices.find(camera => camera.deviceId === deviceId);
+        const selectedCamera = this.cameraState.devices.find((camera) => camera.deviceId === deviceId);
         if (!selectedCamera) {
             console.warn('Selected camera not found in available devices');
         }
 
         const requestedResolution = this.cameraState.targetResolution ?? null;
-        const autoSwapResolution = this.cameraState.isAutoRotate ?? false;
-
-        const shouldSwapDimensions = requestedResolution !== null && this.shouldSwapDimensions(
-            requestedResolution,
-            { width, height },
-            autoSwapResolution ?? false
-        );
+        const autoSwapResolution = this.cameraState.enableAutoRotation ?? false;
+        const shouldSwapDimensions =
+            requestedResolution !== null &&
+            this.shouldSwapDimensions(requestedResolution, { width, height }, autoSwapResolution ?? false);
 
         const actualResolution: Resolution = {
             width: shouldSwapDimensions ? height : width,
@@ -454,22 +492,26 @@ export class CameraControl {
             name: requestedResolution?.name || 'unknown',
         };
 
-        if (requestedResolution && (requestedResolution.width !== actualResolution.width || requestedResolution.height !== actualResolution.height)) {
+        if (
+            requestedResolution &&
+            (requestedResolution.width !== actualResolution.width ||
+                requestedResolution.height !== actualResolution.height)
+        ) {
             console.warn(
                 `Requested resolution (${requestedResolution.width}x${requestedResolution.height}) ` +
-                `differs from actual resolution (${actualResolution.width}x${actualResolution.height})` +
-                (shouldSwapDimensions ? ' (dimensions were swapped)' : '')
+                    `differs from actual resolution (${actualResolution.width}x${actualResolution.height})` +
+                    (shouldSwapDimensions ? ' (dimensions were swapped)' : '')
             );
         }
 
-        const updatedConfig: Partial<CameraState> = {
+        const updatedConfig: Partial<CameraRuntimeState> = {
             targetResolution: actualResolution,
             selectedDevice: selectedCamera ?? undefined,
             cameraType: (facingMode as CameraType) || this.cameraState.cameraType,
         };
 
         this.updateCameraState({
-            stream: stream,
+            activeStream: stream,
             isActive: true,
             activeDevice: selectedCamera,
             activeResolution: actualResolution,
@@ -496,7 +538,7 @@ export class CameraControl {
             return (
                 (swappedWidth === requested.width && swappedHeight === requested.height) ||
                 Math.abs(swappedWidth / swappedHeight - requestedAspectRatio) <
-                Math.abs(currentAspectRatio - requestedAspectRatio)
+                    Math.abs(currentAspectRatio - requestedAspectRatio)
             );
         }
 
@@ -505,21 +547,19 @@ export class CameraControl {
 
     private applyMirrorEffect(): void {
         if (this.cameraState.previewElement) {
-            this.cameraState.previewElement.style.transform =
-                this.cameraState.isMirrored
-                    ? 'scaleX(-1)'
-                    : 'scaleX(1)';
+            this.cameraState.previewElement.style.transform = this.cameraState.enableMirroring
+                ? 'scaleX(-1)'
+                : 'scaleX(1)';
         }
     }
 
-    async stopStream(): Promise<void> {
+    public async stopStream(): Promise<void> {
         try {
-            if (this.cameraState.stream) {
-                this.cameraState.stream.getTracks().forEach(track => track.stop());
-                this.updateCameraState({ stream: undefined });
-
-                if (this.cameraState.onStopped) {
-                    this.cameraState.onStopped();
+            if (this.cameraState.activeStream) {
+                this.cameraState.activeStream.getTracks().forEach((track) => track.stop());
+                this.updateCameraState({ activeStream: undefined });
+                if (this.cameraState.onCameraStop) {
+                    this.cameraState.onCameraStop();
                 }
             }
 
@@ -540,11 +580,11 @@ export class CameraControl {
 
     public async updateSettings(settings: Partial<CameraSettings>): Promise<void> {
         try {
-            if (!this.cameraState.stream) {
+            if (!this.cameraState.activeStream) {
                 throw new CameraError('no-stream', 'No stream to update settings on');
             }
 
-            const videoTrack = this.cameraState.stream.getVideoTracks()[0];
+            const videoTrack = this.cameraState.activeStream.getVideoTracks()[0];
             const capabilities = videoTrack.getCapabilities();
             const newSettings: Partial<MediaTrackSettings> = {};
 
@@ -564,8 +604,8 @@ export class CameraControl {
             this.updateCameraState({
                 currentSettings: {
                     ...this.cameraState.currentSettings,
-                    ...settings
-                }
+                    ...settings,
+                },
             });
 
             // todo: callback
@@ -582,69 +622,85 @@ export class CameraControl {
     }
 
     /**
-  * Apply camera configuration changes
-  */
+     * Apply camera configuration changes
+     */
     public async applyConfigurationChanges(
-        newConfig: Partial<CameraState>,
+        newConfig: Partial<CameraRuntimeState>,
         forceRestart: boolean = false
     ): Promise<void> {
+        // ตรวจสอบค่า newConfig
+        if (!newConfig) {
+            throw new Error('No configuration provided');
+        }
+
+        // เก็บค่า this.cameraState ในตัวแปรชั่วคราว
         const prevConfig = this.cameraState;
+
+        // ตรวจสอบการเปลี่ยนแปลง
         const isDeviceChanged = newConfig.selectedDevice?.deviceId !== prevConfig.selectedDevice?.deviceId;
         const isFacingModeChanged = newConfig.cameraType !== prevConfig.cameraType;
-        const isResolutionChanged = newConfig.targetResolution && (newConfig.targetResolution.width !== prevConfig.targetResolution?.width || newConfig.targetResolution.height !== prevConfig.targetResolution?.height);
-        const updatedConfig: Partial<CameraState> = {
+        const isResolutionChanged =
+            newConfig.targetResolution &&
+            (newConfig.targetResolution.width !== prevConfig.targetResolution?.width ||
+                newConfig.targetResolution.height !== prevConfig.targetResolution?.height);
+
+        // อัปเดตค่า config
+        const updatedConfig: Partial<CameraRuntimeState> = {
             ...prevConfig,
             ...newConfig,
         };
 
-        // update state
+        // อัปเดต state
         this.updateCameraState(updatedConfig);
 
-        // apply changes
-        if (!this.cameraState.stream || !this.cameraState.previewElement) {
+        // ตรวจสอบว่า activeStream และ previewElement มีค่าหรือไม่
+        if (!this.cameraState.activeStream || !this.cameraState.previewElement) {
             await this.startStream();
             return;
         }
 
+        // ตรวจสอบเงื่อนไขสำหรับการเริ่มสตรีมใหม่
         if (isDeviceChanged || isFacingModeChanged || isResolutionChanged || forceRestart) {
             await this.startStream();
             return;
         }
 
-        const track = this.cameraState.stream.getVideoTracks()[0];
+        // ตรวจสอบ video track
+        const track = this.cameraState.activeStream.getVideoTracks()[0];
         if (!track) {
             throw new Error('No video track found');
         }
 
+        // ตรวจสอบการเปลี่ยนแปลง settings
         const currentSettings = track.getSettings();
         const newConstraints = this.createMediaStreamConstraints();
         const needsUpdate = this.hasSettingsChanged(currentSettings, newConstraints.video as MediaTrackConstraints);
 
+        // อัปเดต constraints หากจำเป็น
         if (needsUpdate) {
             try {
                 await track.applyConstraints(newConstraints.video as MediaTrackConstraints);
             } catch (error) {
+                // ย้อนกลับการเปลี่ยนแปลงหากเกิดข้อผิดพลาด
                 this.updateCameraState(prevConfig);
                 throw error;
             }
         }
 
-        if (this.cameraState.isMirrored !== prevConfig.isMirrored) {
+        // ตรวจสอบการเปลี่ยนแปลง enableMirroring
+        if (this.cameraState.enableMirroring !== prevConfig.enableMirroring) {
             this.applyMirrorEffect();
         }
     }
 
-    private hasSettingsChanged(
-        currentSettings: MediaTrackSettings,
-        newConstraints: MediaTrackConstraints
-    ): boolean {
+    private hasSettingsChanged(currentSettings: MediaTrackSettings, newConstraints: MediaTrackConstraints): boolean {
         const significantChanges = [
             this.isConstraintChanged(currentSettings.width, newConstraints.width),
             this.isConstraintChanged(currentSettings.height, newConstraints.height),
             this.isConstraintChanged(currentSettings.facingMode, newConstraints.facingMode),
             this.isConstraintChanged(currentSettings.aspectRatio, newConstraints.aspectRatio),
         ];
-        return significantChanges.some(changed => changed);
+        return significantChanges.some((changed) => changed);
     }
 
     private isConstraintChanged(
@@ -667,7 +723,7 @@ export class CameraControl {
             const devices = await this.getDevices();
 
             // Analyze each device
-            const capabilities = await Promise.all(devices.map(device => this.analyzeCameraDevice(device)));
+            const capabilities = await Promise.all(devices.map((device) => this.analyzeCameraDevice(device)));
 
             // Filter out null values
             return capabilities.filter(Boolean) as MaxResolution[];
@@ -683,15 +739,15 @@ export class CameraControl {
                 video: {
                     deviceId: { exact: device.deviceId },
                     width: { ideal: 4096 },
-                    height: { ideal: 2160 }
-                }
+                    height: { ideal: 2160 },
+                },
             });
 
             const track = stream.getVideoTracks()[0];
             const settings = track.getSettings();
 
             // ทำความสะอาด stream ทันที
-            stream.getTracks().forEach(track => track.stop());
+            stream.getTracks().forEach((track) => track.stop());
 
             return {
                 deviceId: device.deviceId,
@@ -713,15 +769,11 @@ export class CameraControl {
     // ตรวจสอบ resolutions ทั้งหมดจากข้อมูล MaxResolution
     checkSupportedResolutionsFromSpecs(
         maxResolution: MaxResolution,
-        resolutions: Resolution[] = CameraControl.STANDARD_RESOLUTIONS
+        resolutions: Resolution[] = CameraLite.STANDARD_RESOLUTIONS
     ): ResolutionSupport[] {
-        return resolutions.map(resolution => ({
+        return resolutions.map((resolution) => ({
             ...resolution,
-            isSupported: this.isResolutionSupportedFromSpecs(
-                maxResolution,
-                resolution.width,
-                resolution.height
-            )
+            isSupported: this.isResolutionSupportedFromSpecs(maxResolution, resolution.width, resolution.height),
         }));
     }
 
@@ -734,33 +786,32 @@ export class CameraControl {
      * @throws Will handle an error if applying the torch constraint fails.
      */
     async enableTorch(enable: boolean) {
-        if (!this.cameraState.stream) {
-            throw new Error('Stream is not initialized');
-        }
-
-        const videoTrack = this.cameraState.stream.getVideoTracks()[0];
-        if (!videoTrack) {
-            throw new Error('No video track found');
-        }
-
-        const capabilities = videoTrack.getCapabilities();
-        if (!('torch' in capabilities)) {
-            throw new CameraError(
-                'torch-error',
-                'Torch capability is not supported on this device',
-            )
-        }
-
         try {
+            if (!this.cameraState.activeStream) {
+                throw new Error('Stream is not initialized');
+            }
+
+            const videoTrack = this.cameraState.activeStream.getVideoTracks()[0];
+            if (!videoTrack) {
+                throw new Error('No video track found');
+            }
+
+            const capabilities = videoTrack.getCapabilities();
+            if (!('torch' in capabilities)) {
+                console.warn('Torch capability is not supported on this device');
+                throw new Error('Torch capability is not supported on this device');
+            }
+
             await videoTrack.applyConstraints({
                 advanced: [{ torch: enable }] as any,
             });
+            this.updateCameraState({ isTorchEnabled: enable });
         } catch (error) {
-            this.handleError(error instanceof CameraError ? error : new CameraError(
-                'torch-error',
-                `Failed to ${enable ? 'enable' : 'disable'} torch`,
-                error as Error
-            ));
+            console.error(`Failed to ${enable ? 'enable' : 'disable'} torch:`, error);
+            console.log('Error:', error instanceof CameraError);
+            this.handleError(
+                error instanceof CameraError ? error : new CameraError('torch-error', `${error}`, error as Error)
+            );
         }
     }
 
@@ -778,10 +829,7 @@ export class CameraControl {
         const capabilities = videoTrack.getCapabilities();
 
         if (!('focusMode' in capabilities) || !(capabilities.focusMode as string[]).includes(focusMode)) {
-            throw new CameraError(
-                'focus-error',
-                `Focus mode '${focusMode}' is not supported on this device.}`,
-            )
+            throw new CameraError('focus-error', `Focus mode '${focusMode}' is not supported on this device.}`);
         }
 
         try {
@@ -789,47 +837,51 @@ export class CameraControl {
                 advanced: [{ focusMode }] as any,
             });
         } catch (error) {
-            this.handleError(error instanceof CameraError ? error : new CameraError(
-                'focus-error',
-                `Failed to set focus mode: ${error}`,
-                error as Error
-            ));
+            this.handleError(
+                error instanceof CameraError
+                    ? error
+                    : new CameraError('focus-error', `Failed to set focus mode: ${error}`, error as Error)
+            );
         }
     }
 
     //#endregion
 
     //#region Camera Control
-    async initialize(config: Partial<CameraState>): Promise<void> {
+    /**
+     * Initializes the camera with the provided configuration.
+     * @param config - The configuration for the camera.
+     * @throws {CameraError} If initialization fails.
+     */
+    async initialize(config: Partial<CameraRuntimeState>): Promise<void> {
         try {
+            console.log('Initializing camera with:', config);
             // Update configuration
             this.updateCameraState(config);
 
             // Check browser support
             this.checkMediaDevicesSupport();
 
-            // Check browser support
-            this.checkMediaDevicesSupport();
-
             // Get available devices
             await this.updateDeviceList();
+            console.log('Available devices:', this.cameraState.devices);
 
-            // ? Set initial constraints and tart stream with initial configuration
+            // Start stream with initial configuration
             await this.startStream();
-        } catch (error) { // ควรระบุ type เป็น unknown
-            console.error('Failed to start:', error);
-
+        } catch (error) {
             // แยกการตรวจสอบ error type ให้ชัดเจน
-            const baseError = error instanceof CameraError
-                ? error
-                : (error instanceof Error
-                    ? new CameraError('unknown', `${error}`, error)
-                    : new CameraError('unknown', 'An unknown error occurred'));
+            const baseError =
+                error instanceof CameraError
+                    ? error
+                    : error instanceof Error
+                    ? new CameraError('unknown', `${error.message}`, error)
+                    : new CameraError('unknown', 'An unknown error occurred');
 
             // ตรวจสอบ originalError ให้แน่ใจว่ามีอยู่จริง
-            const cameraError = 'originalError' in baseError
-                ? this.analyzeCameraError(baseError.originalError)
-                : this.analyzeCameraError(baseError);
+            const cameraError =
+                'originalError' in baseError
+                    ? this.analyzeCameraError(baseError.originalError)
+                    : this.analyzeCameraError(baseError);
 
             // อัพเดท state และ handle error
             this.updateCameraState({ error: cameraError });
@@ -838,30 +890,30 @@ export class CameraControl {
     }
 
     /**
-  * Switches to the next available camera
-  */
+     * Switches to the next available camera
+     */
     async switchCamera(): Promise<void> {
         try {
             const nextDevice = await this.findNextDevice();
             if (nextDevice) {
                 await this.applyConfigurationChanges({ selectedDevice: nextDevice }, true);
             } else {
-                throw new Error("No device found");
+                throw new CameraError('no-device', 'No device found');
             }
         } catch (error) {
-            console.error('Failed to switch camera:', error);
-
             // แยกการตรวจสอบ error type ให้ชัดเจน
-            const baseError = error instanceof CameraError
-                ? error
-                : (error instanceof Error
-                    ? new CameraError('unknown', `${error}`, error)
-                    : new CameraError('unknown', 'An unknown error occurred'));
+            const baseError =
+                error instanceof CameraError
+                    ? error
+                    : error instanceof Error
+                    ? new CameraError('unknown', `${error.message}`, error)
+                    : new CameraError('unknown', 'An unknown error occurred');
 
             // ตรวจสอบ originalError ให้แน่ใจว่ามีอยู่จริง
-            const cameraError = 'originalError' in baseError
-                ? this.analyzeCameraError(baseError.originalError)
-                : this.analyzeCameraError(baseError);
+            const cameraError =
+                'originalError' in baseError
+                    ? this.analyzeCameraError(baseError.originalError)
+                    : this.analyzeCameraError(baseError);
 
             // อัพเดท state และ handle error
             this.updateCameraState({ error: cameraError });
@@ -882,20 +934,12 @@ export class CameraControl {
 
             // NotFoundError เกิดเมื่อไม่พบกล้อง
             if (error.name === 'NotFoundError') {
-                return new CameraError(
-                    'no-device',
-                    'No camera device was found',
-                    error
-                );
+                return new CameraError('no-device', 'No camera device was found', error);
             }
 
             // NotAllowedError หรือ PermissionDeniedError เกิดเมื่อผู้ใช้ปฏิเสธการขอใช้กล้อง
             if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                return new CameraError(
-                    'permission-denied',
-                    'Camera access permission was denied',
-                    error
-                )
+                return new CameraError('permission-denied', 'Camera access permission was denied', error);
             }
 
             // ConstraintNotSatisfiedError เกิดเมื่อไม่สามารถใช้งานตาม constraints ที่กำหนด
@@ -904,38 +948,54 @@ export class CameraControl {
                     'configuration-error',
                     'Camera could not satisfy the requested constraints',
                     error
-                )
+                );
+            }
+
+            // OverconstrainedError เกิดเมื่อ constraints ที่กำหนดไม่สามารถใช้งานได้
+            if (error.name === 'OverconstrainedError') {
+                return new CameraError('configuration-error', 'The requested constraints cannot be satisfied', error);
+            }
+
+            // AbortError เกิดเมื่อกระบวนการถูกยกเลิก
+            if (error.name === 'AbortError') {
+                return new CameraError('unknown', 'The operation was aborted', error);
+            }
+
+            // TypeError เกิดเมื่อมีข้อผิดพลาดในการใช้งาน API
+            if (error.name === 'TypeError') {
+                return new CameraError('unknown', 'An invalid argument was provided', error);
             }
         }
 
         // กรณีอื่นๆ
-        return new CameraError(
-            'unknown',
-            'An unknown error occurred',
-            error as Error
-        );
+        return new CameraError('unknown', 'An unknown error occurred', error as Error);
     }
 
     private async updateCapabilities(): Promise<void> {
-        console.log("Updating camera capabilities...");
-        if (!this.cameraState.stream) {
-            console.log("No stream available. Cannot update capabilities.");
+        console.log('Updating camera capabilities...');
+        if (!this.cameraState.activeStream) {
+            console.log('No stream available. Cannot update capabilities.');
             return;
         }
 
-        const videoTrack = this.cameraState.stream.getVideoTracks()[0];
+        const videoTrack = this.cameraState.activeStream.getVideoTracks()[0];
         const capabilities = videoTrack.getCapabilities();
 
-        console.log("Capabilities:", capabilities);
+        console.log('Capabilities:', capabilities);
 
         // check if capabilities are available
         this.updateCameraState({
-            isMirrored: capabilities.facingMode?.includes('user') ?? false,
+            enableAudio: capabilities.facingMode?.includes('user') ?? false,
             supportsTorch: 'torch' in capabilities,
             supportsFocus: 'focusMode' in capabilities,
-            supportsZoom: 'zoom' in capabilities
+            supportsZoom: 'zoom' in capabilities,
         });
-        console.log("Updated capabilities:", this.cameraState);
+        console.log('Updated capabilities:', this.cameraState);
+    }
+
+    public toggleMirroring(): void {
+        this.cameraState.enableMirroring = !this.cameraState.enableMirroring;
+        this.applyMirrorEffect();
     }
 
     /**
@@ -943,8 +1003,14 @@ export class CameraControl {
      */
     public async destroy(): Promise<void> {
         this.stopStream();
-        this.events.clear();
         this.resetCameraState();
+        this.removeEventListeners();
+    }
+
+    private removeEventListeners(): void {
+        navigator.mediaDevices.removeEventListener('devicechange', this.updateDeviceList);
+        // document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+        // window.removeEventListener('orientationchange', this.handleOrientationChange);
     }
     //#endregion
 
@@ -956,15 +1022,15 @@ export class CameraControl {
      *          or `null` if an error occurs.
      */
     public async takePhoto(options: CameraCaptureOptions): Promise<CameraCapturedResult | null> {
-        if (!this.cameraState.stream) {
-            throw new Error('Camera is not started');
+        if (!this.cameraState.activeStream) {
+            throw new CameraError('no-stream', 'Camera is not started');
         }
 
         const previewElement = this.cameraState.previewElement;
         const captureElement = this.cameraState.captureElement;
 
         if (!previewElement || !captureElement) {
-            throw new Error('Camera is not properly configured');
+            throw new CameraError('configuration-error', 'Camera is not properly configured');
         }
 
         try {
@@ -975,7 +1041,7 @@ export class CameraControl {
             captureElement.height = height;
             const context = captureElement.getContext('2d');
             if (!context) {
-                throw new Error('Unable to get canvas context');
+                throw new CameraError('canvas-error', 'Unable to get canvas context');
             }
 
             if (options.mirror) {
@@ -989,15 +1055,15 @@ export class CameraControl {
                 width,
                 height,
                 uri: dataUrl,
+                timestamp: new Date().toISOString(),
                 base64: dataUrl.split(',')[1],
             };
         } catch (error) {
-            this.handleError(new CameraError(
+            throw new CameraError(
                 'camera-take-photo-error',
                 'Failed to take photo',
-                error instanceof Error ? error : undefined
-            ));
-            return null;
+                error instanceof Error ? error : new Error(`${error}`)
+            );
         }
     }
 
@@ -1010,7 +1076,11 @@ export class CameraControl {
      * @returns An object containing the calculated width and height.
      *          If the scale is not within the valid range, returns the original dimensions.
      */
-    private calculateScaledSize(videoWidth: number, videoHeight: number, scale: number): { width: number; height: number } {
+    private calculateScaledSize(
+        videoWidth: number,
+        videoHeight: number,
+        scale: number
+    ): { width: number; height: number } {
         if (scale <= 0 || scale > 1 || scale) {
             return { width: videoWidth, height: videoHeight };
         }
@@ -1023,26 +1093,26 @@ export class CameraControl {
     //#endregion
 
     //#region Error Management
-
     /**
      * Handles an error that occurred in the camera control.
      * @param error The error that occurred.
      * Emits an 'onError' event with the error and logs the error to the console.
      */
     private handleError(error: unknown): void {
-        const cameraError = error instanceof CameraError
-            ? error
-            : new CameraError(
-                'unknown',
-                error instanceof Error ? error.message : 'An unknown error occurred',
-                error instanceof Error ? error : undefined
-            );
+        const cameraError =
+            error instanceof CameraError
+                ? error
+                : new CameraError(
+                      'unknown',
+                      error instanceof Error ? error.message : 'An unknown error occurred',
+                      error instanceof Error ? error : undefined
+                  );
 
         // เรียก Callback หากถูกกำหนด
         if (this.cameraState.onError) {
             this.cameraState.onError({
                 status: 'error',
-                error: cameraError
+                error: cameraError,
             });
         }
 
@@ -1060,7 +1130,7 @@ export class CameraControl {
 
     /**
      * Checks if the error is related to the camera being in use.
-     * 
+     *
      * @param error - The error to check. Can be an Error object or undefined.
      * @returns A boolean indicating whether the error is a camera in-use error, specifically 'NotReadableError' or 'AbortError'.
      */

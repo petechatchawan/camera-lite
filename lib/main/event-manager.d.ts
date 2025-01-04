@@ -1,8 +1,9 @@
-export type EventType = 'start' | 'stop' | 'error' | 'photo' | 'ready';
+import { CameraError, CameraErrorCode } from "../types/error.types";
+export type EventType = 'deviceChange' | 'streamStart' | 'streamStop' | 'capture' | 'recordStart' | 'recordStop' | 'onSettingsChange' | 'error';
 export interface EventDetail {
     status: 'success' | 'error';
     data?: any;
-    error?: Error;
+    error?: CameraError<CameraErrorCode>;
 }
 export type EventCallback = (detail: EventDetail) => void;
 export declare class EventManager {

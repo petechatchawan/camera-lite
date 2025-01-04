@@ -1,7 +1,20 @@
 {
-  "name": "camera-control",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "camera-lite",
+  "description": "A library for controlling the camera in a browser",
+  "version": "1.0.2",
+  "main": "./lib/index.js",
+  "module": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/petechatchawan/camera-lite.git"
+  },
+  "files": [
+    "lib",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "lint": "eslint ./src/**.ts",
     "test": "jest",
@@ -9,13 +22,18 @@
     "test:coverage": "jest --coverage",
     "clean": "rm -rf dist",
     "build": "tsc --project tsconfig.json",
-    "prepublishOnly": "npm run clean && npm run build",
-    "publish": "npm publish --access=public"
+    "prepublishOnly": "npm run clean && npm run build"
   },
-  "keywords": [],
+  "keywords": [
+    "camera",
+    "browser",
+    "web",
+    "camera",
+    "stream",
+    "video"
+  ],
   "author": "",
-  "license": "ISC",
-  "description": "",
+  "license": "MIT",
   "dependencies": {
     "@types/jest": "^29.5.13",
     "@typescript-eslint/eslint-plugin": "^8.7.0",

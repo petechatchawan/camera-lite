@@ -1,19 +1,18 @@
-import { EventDetail } from "../main/event-manager";
-import { CameraError, CameraErrorCode } from "./error.types";
+import { CameraError, CameraErrorCode, CameraEventDetail } from './error.types';
 
 export enum PermissionStatus {
     /**
      * User has granted the permission.
      */
-    GRANTED = "granted",
+    GRANTED = 'granted',
     /**
      * User hasn't granted or denied the permission yet.
      */
-    UNDETERMINED = "undetermined",
+    UNDETERMINED = 'undetermined',
     /**
      * User has denied the permission.
      */
-    DENIED = "denied"
+    DENIED = 'denied',
 }
 
 export interface PermissionResponse {
@@ -21,7 +20,18 @@ export interface PermissionResponse {
     granted: boolean;
 }
 
-export type CameraType = 'front' | 'back';
+/**
+ * Represents the orientation of the device.
+ */
+export interface Orientation {
+    type: 'portrait-primary' | 'portrait-secondary' | 'landscape-primary' | 'landscape-secondary';
+    angle: number; // Angle in degrees (0, 90, 180, 270)
+}
+
+/**
+ * Represents the type of camera (e.g., front or back).
+ */
+export type CameraType = 'front' | 'back' | 'unknown';
 
 export type ImageType = 'image/png' | 'image/jpeg';
 
@@ -29,6 +39,7 @@ export type CameraCapturedResult = {
     width: number;
     height: number;
     uri: string;
+    timestamp: string;
     base64?: string;
 };
 
@@ -40,13 +51,13 @@ export type CameraCaptureOptions = {
     isImageMirror?: boolean;
 };
 
+/**
+ * Represents the resolution of the camera.
+ */
 export interface Resolution {
-    width: number;
-    height: number;
-    name?: string;
-    // aspectRatio: number;
-    // name: string;
-    // preset?: ResolutionPreset;
+    width: number; // Width in pixels
+    height: number; // Height in pixels
+    name?: string; // Name of the resolution
 }
 
 export interface MaxResolution {
@@ -100,55 +111,50 @@ export interface CameraSettings {
     brightness?: number;
     focusDistance?: number;
     zoom?: number;
-};
-
-// Main Camera State Interface
-export interface CameraState {
-    // Device Information
-    devices: MediaDeviceInfo[];
-    activeDevice?: MediaDeviceInfo;
-    activeResolution?: Resolution;
-    hasMultipleDevices: boolean;
-    selectedDevice?: MediaDeviceInfo | null;
-    cameraType?: CameraType;
-
-    // Stream and Activity State
-    stream?: MediaStream | null;
-    isActive: boolean;
-    isInitializing: boolean;
-
-    // Settings and Capabilities
-    capabilities?: CameraCapabilities;
-    currentSettings?: CameraSettings;
-    isAudioEnabled: boolean;
-    targetResolution?: Resolution;
-    fallbackResolution?: Resolution;
-    isAutoRotate: boolean;
-
-    // Elements
-    previewElement: HTMLVideoElement | null;
-    captureElement: HTMLCanvasElement | null;
-
-    // Features Support
-    supportsTorch: boolean;
-    supportsFocus: boolean;
-    supportsZoom: boolean;
-    supportsRecording: boolean;
-
-    // UI State
-    isMirrored: boolean;
-
-    // Results
-    lastCapturedImage?: CameraCapturedResult;
-
-    // Error Handling
-    error?: CameraError<CameraErrorCode>;
-
-    // Callbacks
-    onStateChange?: (state: CameraState) => void;
-    onError?: (error: EventDetail) => void;
-    onStarted?: () => void
-    onStopped?: () => void;
 }
 
+/**
+ * Configuration for initializing the camera.
+ */
+export interface CameraConfig {
+    // Required properties
+    enableAudio: boolean; // Enable/disable audio
+    previewElement: HTMLVideoElement | null; // Video element for preview
+    captureElement: HTMLCanvasElement | null; // Canvas element for capturing images
 
+    // Optional properties
+    targetResolution?: Resolution; // Target resolution for the camera
+    fallbackResolution?: Resolution; // Fallback resolution if target is not supported
+    enableMirroring?: boolean; // Enable/disable mirroring of the video feed
+    enableAutoRotation?: boolean; // Enable/disable auto-rotation based on device orientation
+    selectedDevice?: MediaDeviceInfo; // Selected camera device
+
+    // Callbacks
+    onStateChange?: (state: CameraRuntimeState) => void; // Callback for state changes
+    onCameraStart?: () => void; // Callback when the camera starts
+    onCameraStop?: () => void; // Callback when the camera stops
+    onError?: (error: CameraEventDetail) => void; // Callback when an error occurs
+}
+
+/**
+ * Represents the runtime state of the camera.
+ */
+export interface CameraRuntimeState extends CameraConfig {
+    devices: MediaDeviceInfo[]; // List of available camera devices
+    activeDevice?: MediaDeviceInfo; // Currently active camera device
+    activeResolution?: Resolution; // Currently active resolution
+    activeStream?: MediaStream; // Currently active media stream
+    hasMultipleDevices: boolean; // Whether multiple devices are available
+    cameraType: CameraType; // Type of camera (e.g., front, back)
+    isActive: boolean; // Whether the camera is currently active
+    isInitializing: boolean; // Whether the camera is initializing
+    capabilities?: CameraCapabilities; // Capabilities of the active camera
+    currentSettings?: CameraSettings; // Current camera settings
+    supportsTorch: boolean; // Whether the camera supports torch/flash
+    supportsFocus: boolean; // Whether the camera supports focus
+    supportsZoom: boolean; // Whether the camera supports zoom
+    supportsRecording: boolean; // Whether the camera supports recording
+    isTorchEnabled: boolean; // Whether the torch is currently enabled
+    lastCapturedImage?: CameraCapturedResult; // Last captured image result
+    error?: CameraError<CameraErrorCode>; // Last error encountered
+}
